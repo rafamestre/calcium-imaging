@@ -1,48 +1,70 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue May 30 12:23:44 2017
+CIA: Calcium Imaging Analyser
 
-@author: rmestre
+v1.0
+
+22/01/2022    
+
+@author: Rafael Mestre; r.mestre@soton.ac.uk; rafa.mestrec@gmail.com
+
 """
+
 #from IPython import get_ipython
 #get_ipython().run_line_magic('matplotlib', 'auto')
 import sys
-import traceback
+# import traceback
 from PyQt5.QtWidgets import QWidget, QRubberBand, QSlider, QLabel, QApplication, QDesktopWidget
 from PyQt5.QtWidgets import QVBoxLayout, QTabWidget, QSizePolicy, QPushButton, QLineEdit, QGridLayout
-from PyQt5.QtWidgets import QFileDialog
-from PyQt5.QtGui import *
-from PyQt5.QtGui import QImage, qRed, qGreen, qBlue
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import *
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QImage
+# from PyQt5.QtGui import qRed, qGreen, qBlue
+# from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QSize, QRect, Qt
 import cv2
 import os
 import numpy as np
-import struct
+# import struct
 import matplotlib
 #matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+# from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 matplotlib.use('Qt5Agg')  
 from scipy import signal
-import pickle
+# import pickle
 import matplotlib.ticker as plticker
 import seaborn as sns
+from pathlib import Path
 
-sns.set_context("talk", font_scale=2, rc={"lines.linewidth": 2})
-#sns.set_style("white")
-sns.set_style("ticks")
-sns.set_palette(sns.color_palette("colorblind", 10))
 
+#######PLOTTING ARGUMENTS
 labelFont = {'fontname':'sans-serif', 'fontsize':34}
 ticksFont= {'fontsize':28}
 pltArgs = {'linewidth' : 3}
+figsize = (12,9)
+sns.set_context("talk", font_scale=2, rc={"lines.linewidth": 2})
+sns.set_style("ticks")
+sns.set_palette(sns.color_palette("colorblind", 10))
 matplotlib.rcParams['axes.linewidth'] = 3
 matplotlib.rcParams['xtick.major.width'] = 3
 matplotlib.rcParams['ytick.major.width'] = 3
-figsize = (12,9)
+
+
+######GLOBAL VARIABLES
+
+videoNameFull = None
+currentFrame = None
+dirVideos = None
+videoFrames = None
+length = None
+width = None
+height = None
+fps = None
+cropped = None
+
 
 class cropPopUp(QWidget):
     
@@ -96,11 +118,11 @@ class mainWindow(QWidget):
         
         global currentFrame
         global dirVideos
-        dirVideos = None
+        # dirVideos = None
         
         self.setGeometry(100, 100, 1000, 600)
         self.setFixedSize(1000,600)
-        self.setWindowTitle('Calcium imaging analyzer')
+        self.setWindowTitle('Calcium imaging analyser v1.0')
         #self.setWindowIcon(QIcon('web.png'))        
         self.center()
 
@@ -114,7 +136,7 @@ class mainWindow(QWidget):
  
         # Add tabs
         self.tabs.addTab(self.tab1,"Viewer")
-        self.tabs.addTab(self.tab2, "Analyzer")
+        self.tabs.addTab(self.tab2, "Analyser")
  
         # Create first tab
 #        self.tab1.layout = QVBoxLayout(self)
@@ -130,10 +152,11 @@ class mainWindow(QWidget):
 
         
         self.main_frame = QWidget()
-
+        
+        # Creates the canvas with the PlotCanvas class
+        # They are the left and right plots, respectively
         self.canvas = PlotCanvas(self)
         self.canvas.setParent(self.main_frame)  
-        
         self.canvas2 = PlotCanvas(self)
         self.canvas2.setParent(self.main_frame)  
     
@@ -142,6 +165,7 @@ class mainWindow(QWidget):
         qbtn.resize(qbtn.sizeHint())
         #qbtn.move(500, 500)  
         
+        # Button to crop the video
         popUpBtn = QPushButton('Crop',self)
         popUpBtn.clicked.connect(self.cropVideo)
         #popUpBtn.move(600,600)
@@ -150,24 +174,30 @@ class mainWindow(QWidget):
         analyzeBtn.clicked.connect(self.analyze)
         #cropBtn.move(700,600)
         
+        # Button to select the video file
         selectBtn = QPushButton('Select File',self)
         selectBtn.clicked.connect(self.selectFile)
         
         self.rangeEdit = QLineEdit(self)    
         self.rangeEdit2  = QLineEdit(self)
         
+        # Button to change the range from both canvases
         rangeBtn = QPushButton('Change range',self)
         rangeBtn.clicked.connect(self.change_range_both_canvases)
 
+        # Button to clear the data from the plots, resets them
         clearBtn = QPushButton('Clear data',self)
         clearBtn.clicked.connect(self.clear_both_canvases)
         
+        # Button to reset the limits of the plots
         resetLimitsBtn = QPushButton('Reset limits',self)
         resetLimitsBtn.clicked.connect(self.reset_limits_both_canvases)
         
+        # Button to save the plot 1
         saveBtn1 = QPushButton('Save plot 1',self)
         saveBtn1.clicked.connect(self.selectDirectory1)
         
+        # Button to save the plot 2
         saveBtn2 = QPushButton('Save plot 2',self)
         saveBtn2.clicked.connect(self.selectDirectory2)
         
@@ -182,27 +212,32 @@ class mainWindow(QWidget):
 #        self.yLabelEdit  = QLineEdit(self)     
 #        self.fontEdit  = QLineEdit(self)     
        
-
-        directory = ('C:\\Users\\rmestre\\OneDrive - IBEC\\PhD\\'+ \
-                              'C2C12\\032417 Day 7 calcium\\' + \
-                              'Training3_signals.png')
+        ## TODO: USE PATH LIBRARY FOR THIS, USE CURRENT DIRECTORY
+        # directory = ('C:\\Users\\rmestre\\OneDrive - IBEC\\PhD\\'+ \
+        #                       'C2C12\\032417 Day 7 calcium\\' + \
+        #                       'Training3_signals.png')
 
         #self.getVideo()
         
         self.vid = QLabel(self)
         self.vid.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         
+        # Time slider that updates the current frame to be shown
         self.videoSl = QSlider(Qt.Horizontal)
 #        self.videoSl.setMinimum(0)
 #        self.videoSl.setMaximum(length)
 #        self.videoSl.setValue(0)
         self.videoSl.setTickInterval(1)
         self.videoSl.setTickPosition(QSlider.TicksBelow)
+        # When the value is changed, the frame is updated
         self.videoSl.valueChanged.connect(self.convertVideoAndShow)
         
 #        self.convertVideoAndShow() 
 #        self.cropFrame.setPixmap(currentFrame)
 
+
+        #### Grid: positining of the buttons and other stuff
+        # Tab 1
         self.tab1.layout = QGridLayout()
         #self.tab1.layout.setColumnMinimumWidth(1,1)
         #self.layout.setSpacing(1)
@@ -213,11 +248,11 @@ class mainWindow(QWidget):
         self.tab1.layout.addWidget(analyzeBtn,4,1)  
         self.tab1.layout.addWidget(selectBtn,4,0)
 
-        
 #        self.layout.addWidget(self.cropFrame)
+        # Layout is added
         self.tab1.setLayout(self.tab1.layout)
         
-        
+        # Tab 2
         self.tab2.layout = QGridLayout()
         self.tab2.layout.addWidget(self.canvas,1,0,1,2)
         self.tab2.layout.addWidget(self.canvas2,1,2,1,2)   
@@ -235,41 +270,39 @@ class mainWindow(QWidget):
         self.rangeEdit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.rangeEdit2.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
-
-
         #self.layout.addWidget(self.toolbar)
-     
+        
+        # Layout is added
         self.tab2.setLayout(self.tab2.layout)
         
-        
+        # Final layout is set
         self.layout.addWidget(self.tabs)
         self.setLayout(self.layout)
 
-        
-        
+        # Show everything
         self.show()
 
 
     
     def clear_both_canvases(self):
-        
+        # Clears the data from both canvases (right and left)
         self.canvas.clear_data()
         self.canvas2.clear_data()
         
     def reset_limits_both_canvases(self):
-        
+        # Resets the limits of both canvases (right and left)
         self.canvas.reset_limits()
         self.canvas2.reset_limits()
         
         
     def change_range_both_canvases(self):
-        
+        # Changes the range of the plots in both canvases (right and left)
         self.canvas.change_range()
         self.canvas2.change_range()
         
 
     def QImageToCvMat(self,incomingImage):
-        '''  Converts a QImage into an opencv MAT format  '''
+        # Converts a QImage into an opencv MAT format
         incomingImage = incomingImage.convertToFormat(QImage.Format_RGB32)
         
         width = incomingImage.width()
@@ -280,24 +313,30 @@ class mainWindow(QWidget):
         return arr
    
     def analyzeAllVideo(self):
+        # Analyse the whole video
         
-        global length
-        global videoFrames
+        
+        
+        # global length
+        # global videoFrames
         global fps
         
+        # sumaTotal stores the total intensity in the cropped image
+        # over time (length)
         sumaTotal = list()
         for x in range(0,length):
-            
+            # Loop through the length of the video
             frame = videoFrames[x]
    
             image = QImage(frame, frame.shape[1],\
                             frame.shape[0], frame.shape[1] * 3,QImage.Format_RGB888)
-
+            # Image is cropped
             QPixmapCrop = QPixmap(image).copy(cropped)
             image = QPixmapCrop.toImage()
             width = image.width()
             height = image.height()      
             
+            # Image is converted to opencv MAT format to sum the intensity
             arr = self.QImageToCvMat(image)
             intensity_image = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)
             suma = 0
@@ -305,13 +344,18 @@ class mainWindow(QWidget):
                 for x in range(0,width):
                     suma += intensity_image[y,x,2]
             sumaTotal.append(suma)
-            
+        
+        # An offset in the y direction for the plots is calculated
+        # and applied. This is an offset that's forcefully applied to move
+        # the plots a bit in the y-axis to avoid that they crash with each
+        # other. This is not problematic because the y-axis has arbitrary units
         maxSumaLog = np.log10(np.max(sumaTotal))
         offset = 0
         if self.canvas.nbPlots > 0:
             offset = 10*(self.canvas.nbPlots) + np.max(sumaTotal)/(10**(maxSumaLog-1))
         sumaTotal = [offset+sumaTotal[i]/(10**(maxSumaLog-1)) for i in range(len(sumaTotal))]
         
+        # TODO: figure out this
         exception = True
         
         if exception:
@@ -319,7 +363,7 @@ class mainWindow(QWidget):
             fps = 7.6416
             fps = 50
             fps = 12.5
-            
+        
         time = np.linspace(0,len(sumaTotal)/fps,len(sumaTotal))
 #        # discards the old graph
 #        self.figure.clear()
@@ -331,11 +375,13 @@ class mainWindow(QWidget):
 #        self.canvas.draw()
 #        print(fps)
         
+        # If this is the first plot, create the axes
         if self.canvas.nbPlots == 0:
             self.canvas.create_axes()
             self.canvas2.create_axes()
             
-        
+        # Detrend the signal for canvas 2
+        # and apply the offset for this plot
         detrended = signal.detrend(np.asarray(sumaTotal))
         maxDetrendedLog = np.log10(np.max(detrended))
         if self.canvas.nbPlots > 0:
@@ -349,8 +395,13 @@ class mainWindow(QWidget):
 
 
     def analyze(self):
-
-        global cropped
+        # When analyze button is pressed, the whole video is analysed
+        # TODO: add an exception if the crop has not been selected
+        
+        # global cropped
+        global width
+        global height
+        #TODO: check if this gives errors
 
         a = currentFrame.copy(cropped)
 
@@ -364,6 +415,8 @@ class mainWindow(QWidget):
     
 
     def cropVideo(self):
+        # Crops the video
+        
         print("Opening a new popup window...")
         self.w = cropPopUp()
         if width > 700 or height > 700:
@@ -377,7 +430,8 @@ class mainWindow(QWidget):
 
 
     def getVideo(self):
-
+        # Loads the video after selecting a file
+        
         global videoNameFull
         global currentFrame
         global dirVideos
@@ -394,7 +448,7 @@ class mainWindow(QWidget):
         videoName = videoNameFull.split("\\\\")[-1]
         dirVideos = videoNameFull[:(len(videoNameFull)-len(videoName))]
         videoName = videoName.split(".avi")[0]
-        
+        #TODO: CHANGE THIS WITH PATH
         
         os.chdir(dirVideos)
         
@@ -435,8 +489,11 @@ class mainWindow(QWidget):
         self.vid.setPixmap(currentFrame2)   
                 
     def selectFile(self):
+        # Selects the video file
+        
+        #TODO: do this with Path
         global videoNameFull
-        print('selecting')
+        print('Selecting file...')
         fname = QFileDialog.getOpenFileName(self, 'Open file', 
                             'c:\\',"Image files (*.avi)")
         print(type(fname))
@@ -447,7 +504,9 @@ class mainWindow(QWidget):
         self.getVideo()   
         
     def selectDirectory1(self):
+        # Saves the plot number 1
         
+        #TODO: change this with Path
         if dirVideos is None:
             startingDir = 'C:\\'
         else:
@@ -464,7 +523,9 @@ class mainWindow(QWidget):
         
         
     def selectDirectory2(self):
+        # Saves the plot number 2
         
+        #TODO: CHANGE THIS WITH PATH
         if dirVideos is None:
             startingDir = 'C:\\'
         else:
@@ -480,7 +541,9 @@ class mainWindow(QWidget):
         
         
     def convertVideoAndShow(self):
-
+        # When the time slider is modified, the current frame
+        # that is shown is updated
+        
         global currentFrame
         frameNb = self.videoSl.value()
         frame = videoFrames[frameNb]
@@ -522,6 +585,7 @@ class PlotCanvas(FigureCanvas):
     def __init__(self, parent = None, w = 9, h = 6):
         
         self.fig = Figure(figsize = (w, h),tight_layout=True)
+        self.axes = None
         #self.axes = self.fig.add_subplot(111)
         # We want the axes cleared every time plot() is called
         #self.axes.hold(False)
@@ -533,6 +597,10 @@ class PlotCanvas(FigureCanvas):
         FigureCanvas.updateGeometry(self)
         self.figure.clear()
 #        self.fig.tight_layout()
+
+        self.dataX = list()
+        self.dataY = list()
+
 
 
     def plot_data(self, x,y):
@@ -566,7 +634,8 @@ class PlotCanvas(FigureCanvas):
         
         
     def clear_data(self):
-        
+        # Clears all the data in the plots: resets data stored
+        # in dataX and dataY, sets nb of plots to 0 and erases figure
         self.dataX = list()
         self.dataY = list()
         self.figure.clear()
@@ -583,28 +652,42 @@ class PlotCanvas(FigureCanvas):
 #        self.fig.tight_layout()
         
     def change_range(self):
-
+        # Changes the range of the plot according to the numbers given
+        
+        # Gets the text stored in the rangeEdit elements
+        # which are actually numbers
         text1 = ex.rangeEdit
         text2 = ex.rangeEdit2
         print(text1.text())
         
         if text1.text().lstrip('-+').isdigit() and text2.text().lstrip('-+').isdigit():
+            # First, it checks they are actually numbers
             if float(text1.text()) < float(text2.text()):
+                # If the first number is less than the second
+                # it changes the limits
                 self.axes.set_xlim([float(text1.text()),float(text2.text())])
                 self.axes.set_aspect(1./self.axes.get_data_ratio())
 #                self.fig.tight_layout()
                 self.draw()
             else:
-                print('Not possible')
+                # If the first number is larger than the second, the
+                # limits don't make sense
+                print('Not possible to change range.')
         else:
-            print('Not possible')
+            # If they are not numbers, it's also not possible to continue
+            # but no error is thrown
+            print('Not possible to change range.')
 
     def reset_limits(self):
-        
-        self.axes.set_xlim(self.originalLimit)
-        self.axes.set_aspect(1./self.axes.get_data_ratio())
-        self.fig.tight_layout()
-        self.draw()
+        # Resets the limits of the axes to the original limit
+        # it also resets the aspect ratio of the plots
+        if self.axes:
+            self.axes.set_xlim(self.originalLimit)
+            self.axes.set_aspect(1./self.axes.get_data_ratio())
+            self.fig.tight_layout()
+            self.draw()
+        else:
+            print('Not possible to resent limits.')
                 
     def save_canvas(self,dname):
         
@@ -668,7 +751,8 @@ class PlotCanvas(FigureCanvas):
         
     def open_figure(self):
         
-        figOpen = plt.figure(figsize=figsize)
+        # figOpen = plt.figure(figsize=figsize)
+        plt.figure(figsize=figsize)
 
         for i in range(0,len(self.dataX)):
             plt.plot(self.dataX[i],self.dataY[i])
